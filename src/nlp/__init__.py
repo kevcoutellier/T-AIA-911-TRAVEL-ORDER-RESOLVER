@@ -23,7 +23,21 @@ from .preprocessing import (
     clean_sentence_id
 )
 
+from .gazetteer import (
+    Gazetteer,
+    load_gazetteer,
+    MAJOR_FRENCH_CITIES,
+    MULTI_WORD_STATIONS,
+    AMBIGUOUS_CITY_NAMES
+)
+
+from .baseline import (
+    BaselineExtractor,
+    load_extractor
+)
+
 __all__ = [
+    # Preprocessing
     'normalize_text',
     'remove_accents',
     'normalize_hyphens',
@@ -34,7 +48,16 @@ __all__ = [
     'split_multi_word_name',
     'fuzzy_normalize',
     'extract_quoted_text',
-    'clean_sentence_id'
+    'clean_sentence_id',
+    # Gazetteer
+    'Gazetteer',
+    'load_gazetteer',
+    'MAJOR_FRENCH_CITIES',
+    'MULTI_WORD_STATIONS',
+    'AMBIGUOUS_CITY_NAMES',
+    # Baseline
+    'BaselineExtractor',
+    'load_extractor'
 ]
 
 __version__ = '0.1.0'
