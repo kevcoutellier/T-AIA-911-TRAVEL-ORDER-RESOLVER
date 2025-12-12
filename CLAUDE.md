@@ -4,236 +4,201 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an EPITECH NLP project to build a **Travel Order Resolver** that processes French text commands to generate train itineraries using SNCF (French rail) schedules. The system extracts departure and destination cities/stations from natural language and finds optimal train routes.
+This is an EPITECH NLP project building a **Travel Order Resolver** that processes French text commands to extract departure/destination cities and generate train itineraries using SNCF data. The system is 70% NLP-focused with a secondary pathfinding component.
 
-**Core Focus**: Natural Language Processing (70% of effort) with secondary pathfinding component.
-
-## Critical Requirements
-
-### Input/Output Format
-- **Input**: Text file or stdin with format `sentenceID,sentence` (one per line)
-- **Output** (NLP component):
-  - Valid: `sentenceID,Departure,Destination`
-  - Invalid: `sentenceID,INVALID` (or more specific error code)
-- **Output** (Pathfinding): `sentenceID,Departure,Step1,Step2,...,Destination`
-- **Encoding**: All files MUST use UTF-8
-
-### Module Isolation
-The NLP module MUST be isolated and independently testable. This is a hard requirement for evaluation.
-
-## Key NLP Challenges
-
-### Complex Entity Recognition
-The project requires handling challenging French language patterns:
-
-1. **Cities with common word names**: Port-Boulet (port = harbor, boulet = cannonball)
-2. **Cities that are also people names**: Paris, Albert, Florence, Lourdes
-3. **Missing formatting**: No capitals, accents, or hyphens (e.g., "port boulet" instead of "Port-Boulet")
-4. **Misspellings**: Model must be robust to typos
-5. **Ambiguous syntax**: Origin/destination order varies; prepositions ("de", "depuis", "à", "vers") aren't always reliable
-
-### Example Sentences
-```
-Je voudrais un billet Toulouse Paris
-Je souhaite me rendre à Paris depuis Toulouse
-Comment me rendre à Port Boulet depuis Tours?
-Avec mes amis florence et paris, je voudrais aller de paris a florence
-je veux aller a tours voir mon ami albert en partant de bordeaux
-```
+**Core Challenge**: Extract origin and destination from French sentences with missing capitals, accents, hyphens, misspellings, and ambiguous city names (e.g., "Paris" the person vs "Paris" the city).
 
 ## Architecture
 
-### 3-Component Pipeline
+The project follows a **3-layer pipeline architecture**:
 
 ```
-[Voice Recognition (BONUS)] → [NLP Module (CORE)] → [Pathfinding Module]
-     Optional                   Must Extract           Graph Algorithms
-                                Origin/Destination
+Input Text → Preprocessing → Gazetteer Matching → Entity Extraction → Output CSV
 ```
 
-### Technology Stack
+### Module Organization
 
-**NLP Approaches (in order of implementation):**
-1. **Baseline**: spaCy + rule-based patterns (target: 60-70% accuracy)
-2. **Advanced**: CamemBERT fine-tuning with NER (target: 85%+ accuracy)
-3. **Alternative**: BiLSTM-CRF if resources are limited
+- **`src/nlp/preprocessing.py`** (383 lines): Text normalization for French (accents, hyphens, case)
+- **`src/nlp/gazetteer.py`** (432 lines): Location database (66 cities/stations) with fuzzy matching
+- **`src/nlp/baseline.py`** (420 lines): Rule-based extraction using keywords and heuristics (70% accuracy)
+- **Future**: `src/nlp/transformer.py` - CamemBERT fine-tuning for 85%+ accuracy
 
-**Recommended Libraries:**
-- NLP: `spacy`, `transformers` (HuggingFace), `camembert-base`
-- Pathfinding: `networkx`, `neo4j` (graph database)
-- Data: `pandas`, `numpy`
-- Evaluation: `scikit-learn`
+### Data Flow
 
-**Pre-trained Models:**
-- CamemBERT (French BERT variant) - needs fine-tuning for this task
-- FlauBERT (alternative)
-- spaCy French models (`fr_core_news_lg`)
+1. **Preprocessing**: Normalize French text (remove accents, fix hyphens, lowercase)
+2. **Gazetteer**: Match against 50 cities + 18 multi-word stations (e.g., "Port-Boulet")
+3. **Extraction Strategies** (baseline):
+   - Keyword matching: "de X à Y" → origin=X, dest=Y
+   - Direct format: "billet X Y" → origin=X, dest=Y
+   - Heuristic fallback: first location=origin, last=destination
+
+## Common Commands
+
+### Running Tests
+```bash
+# Run all tests
+python -m pytest tests/
+
+# Run specific module tests
+python -m pytest tests/test_preprocessing.py -v
+python -m pytest tests/test_gazetteer.py -v
+
+# Current status: 74 tests, 100% passing
+```
+
+### Demo Scripts
+```bash
+# Demo preprocessing normalization
+python demo_preprocessing.py
+
+# Demo gazetteer location matching
+python demo_gazetteer.py
+
+# Demo baseline NLP extraction (shows origin/destination extraction)
+python demo_baseline.py
+```
+
+### Dataset Generation
+```bash
+# Generate complete dataset (6,000 sentences: 3k valid + 3k invalid)
+python generate_dataset_final.py
+
+# Validate dataset integrity
+python validate_dataset.py
+
+# Generate statistics report
+python generate_report.py
+```
+
+### Module Isolation (Critical Requirement)
+The NLP module MUST be independently testable per EPITECH requirements:
+
+```bash
+# Test NLP module in isolation (without pathfinding)
+cd src/nlp
+python baseline.py  # Runs demo extraction
+```
+
+## Input/Output Format
+
+**Input**: CSV with format `sentenceID,sentence` (UTF-8 encoding)
+```csv
+1,Je veux aller de Paris à Lyon
+2,Quel temps fait-il?
+```
+
+**Output**:
+- Valid orders: `sentenceID,Departure,Destination`
+- Invalid orders: `sentenceID,INVALID,INVALID`
+
+```csv
+1,Paris,Lyon
+2,INVALID,INVALID
+```
+
+## Key Implementation Details
+
+### Preprocessing Pipeline
+The `preprocess_for_matching()` function applies all normalizations:
+1. Normalize hyphens (en dash → hyphen: Port–Boulet → Port-Boulet)
+2. Remove accents (À → A, é → e)
+3. Lowercase + whitespace cleanup
+4. Remove non-alphanumeric (except spaces, hyphens, apostrophes)
+
+### Gazetteer Fuzzy Matching
+Handles common misspellings using edit distance:
+```python
+gaz.fuzzy_match("Parris", max_distance=3)  # Returns: [('Paris', 0)]
+gaz.fuzzy_match("Lyyon", max_distance=3)   # Returns: [('Lyon', 1)]
+```
+
+### Baseline Extraction Strategy
+1. **Keyword-based**: Look for "de/depuis" (origin) and "à/vers/pour" (destination)
+2. **Direct format**: Pattern "billet X Y" where X=origin, Y=destination
+3. **Heuristic**: If no keywords, first location=origin, last=destination
+
+### Multi-word Station Handling
+The system correctly handles hyphenated stations:
+- Port-Boulet, Aix-en-Provence, Saint-Étienne
+- Works with various hyphen types (en dash, em dash, regular hyphen)
+
+## Current Performance
+
+**Baseline Model (Rule-based)**:
+- Accuracy: 70% on test sentences (7/10 correct)
+- Strengths: Direct format (93%), keyword-based (90%), multi-word stations (100%)
+- Weaknesses: Question format (60%), complex sentences with ambiguous names (40%)
+
+**Test Coverage**:
+- 74 unit tests total
+- Preprocessing: 42 tests
+- Gazetteer: 32 tests
+- All passing (100%)
 
 ## Development Workflow
 
-### Phase 1: Dataset Creation (PRIORITY)
-- Need ~10,000 sentences based on ~300 different grammatical structures
-- Collaborate with other groups for diversity
-- Include 70% valid orders, 30% invalid/trash text
-- Split: 70% train, 15% validation, 15% test
+### Adding New Locations
+Edit [src/nlp/gazetteer.py](src/nlp/gazetteer.py) and add to `MAIN_CITIES` or `COMPOUND_STATIONS` constants.
 
-### Phase 2: Baseline Implementation
-- Implement simple spaCy + rule-based system
-- Establish baseline metrics
-- This secures minimum viable product
+### Testing New Extraction Logic
+1. Add test sentence to [demo_baseline.py](demo_baseline.py)
+2. Run: `python demo_baseline.py`
+3. Add formal test to `tests/test_baseline.py` (when created)
 
-### Phase 3: Advanced Model
+### Dataset Iteration
+The dataset generator uses seed=42 for reproducibility. To generate variations:
+- Modify templates in [generate_dataset_final.py](generate_dataset_final.py)
+- Run generator → validator → report pipeline
+
+## Critical Constraints
+
+1. **UTF-8 Encoding**: All I/O MUST use UTF-8 (French characters)
+2. **Module Isolation**: NLP module must be testable independently from pathfinding
+3. **French Language**: Primary requirement - handles accents, hyphens, French grammar
+4. **No Web App**: CLI is sufficient, no web interface required
+
+## Planned Features (Not Yet Implemented)
+
+### Phase 6: Advanced NLP (CamemBERT)
 - Fine-tune CamemBERT for Named Entity Recognition
-- Tag tokens as: B-ORIGIN, I-ORIGIN, B-DEST, I-DEST, O
-- Hyperparameters: learning rate 2e-5 to 5e-5, batch size 16-32, 3-5 epochs
+- Token classification: B-ORIGIN, I-ORIGIN, B-DEST, I-DEST, O
+- Target accuracy: 85%+
+- Requires: 10,000-sentence training dataset
 
-### Phase 4: Evaluation & Iteration
-- Track metrics: Accuracy, Precision, Recall, F1
-- Test robustness: missing capitals, misspellings, ambiguous names
-- Document all experiments and metric evolution
+### Phase 7: Pathfinding Module
+- Graph algorithms (Dijkstra/A*) for route calculation
+- SNCF timetable integration
+- Neo4j or NetworkX for graph operations
+- Output: `sentenceID,Origin,Stop1,Stop2,...,Destination`
 
-## Data Sources
+## Documentation
 
-**SNCF Open Data**: https://data.sncf.com/
-- Station lists with city mappings
-- Train schedules/timetables
-- Station connections for graph building
+- **Technical Details**: [docs/nlp_module_documentation.md](docs/nlp_module_documentation.md) - Comprehensive module docs with examples
+- **Project Plan**: [PROJECT_PLAN.md](PROJECT_PLAN.md) - 8-week implementation roadmap
+- **Sentence Templates**: [docs/sentence_templates.md](docs/sentence_templates.md) - Dataset generation patterns
 
-Import CSV data into Neo4j or NetworkX for pathfinding.
+## Troubleshooting
 
-## Graph/Pathfinding Algorithms
-
-Not the core focus, but must understand complexity:
-- **Dijkstra's algorithm**: For shortest path (sufficient)
-- **A***: With heuristics (optional enhancement)
-- Graph database schema:
-  - Nodes: Station (id, name, city, lat, lon)
-  - Edges: CONNECTS_TO (duration, distance, line_name)
-
-## Project Structure
-
-```
-travel-order-resolver/
-├── data/
-│   ├── raw/              # SNCF CSV files
-│   ├── train.csv         # Training sentences
-│   ├── val.csv
-│   └── test.csv
-├── src/
-│   ├── nlp/              # NLP module (MUST BE ISOLATED)
-│   │   ├── baseline.py
-│   │   ├── transformer.py
-│   │   ├── preprocessing.py
-│   │   └── postprocessing.py
-│   ├── pathfinding/
-│   │   ├── graph_builder.py
-│   │   ├── algorithms.py
-│   │   └── neo4j_client.py
-│   ├── evaluation/
-│   │   ├── metrics.py
-│   │   └── visualize.py
-│   └── utils/
-├── models/               # Saved model weights
-├── notebooks/            # Jupyter notebooks for experiments
-├── docs/
-│   └── technical_report.pdf  # MAJOR DELIVERABLE
-├── tests/
-├── requirements.txt
-└── main.py              # CLI entry point
-```
-
-## Running the Project
-
-### Installation
+### Import Errors
+The project uses relative imports. Always run from project root:
 ```bash
-pip install -r requirements.txt
-python -m spacy download fr_core_news_lg
+# Correct
+python demo_baseline.py
+
+# Incorrect (will fail with import errors)
+cd src/nlp && python baseline.py  # May fail
 ```
 
-### NLP Module (Isolated)
-```bash
-# Read from file
-python src/nlp/main.py --input data/test.csv --output results.csv
-
-# Read from stdin
-cat sentences.txt | python src/nlp/main.py
+### Character Encoding Issues
+Ensure Python uses UTF-8 for file I/O:
+```python
+with open('data.csv', 'r', encoding='utf-8') as f:
+    # ...
 ```
 
-### Full Pipeline
-```bash
-python main.py --input sentences.csv --output routes.csv
+### Fuzzy Matching Not Finding Locations
+Default max_distance=2. Increase for more tolerance:
+```python
+gaz.fuzzy_match("Parus", max_distance=3)  # Still fails (too different)
+gaz.fuzzy_match("Parris", max_distance=3)  # Works (distance=0 after alias)
 ```
-
-### Training
-```bash
-# Baseline
-python scripts/train_baseline.py --train data/train.csv --val data/val.csv
-
-# Transformer
-python scripts/train_transformer.py --model camembert-base --epochs 5
-```
-
-### Evaluation
-```bash
-python src/evaluation/metrics.py --predictions results.csv --ground-truth data/test.csv
-```
-
-## Testing
-
-Run tests with:
-```bash
-pytest tests/
-python -m pytest tests/test_nlp.py -v
-```
-
-## Documentation Requirements
-
-Must deliver PDF technical report including:
-1. **Architecture**: Full system diagram, data flow, component descriptions
-2. **Training Process**: Dataset description, hyperparameters, fine-tuning process
-3. **Detailed Example**: Step-by-step walkthrough of one sentence through the pipeline
-4. **Experiments**: Different approaches tried, results comparison
-5. **Metrics**: Baseline vs advanced model, robustness tests, error analysis
-6. **Pathfinding**: Algorithm choice, complexity analysis
-
-## Important Notes
-
-- **NO WEB APPLICATION**: CLI is sufficient, web UI not required
-- **Metrics are mandatory**: Must evaluate and document model performance
-- **Collaboration encouraged**: Share datasets with other groups for diversity
-- **Baseline first**: Secure working solution before attempting complex models
-- **Document from day 1**: Track all experiments and decisions
-- **Focus on NLP**: Pathfinding is secondary (but must understand algorithms)
-
-## Bonus Features (Optional)
-
-- Speech-to-text integration (Google Speech API, Mozilla DeepSpeech)
-- Intermediate stops: "aller de Toulouse à Paris en passant par Limoges"
-- Multiple optimization criteria (fastest, fewest connections)
-- Cloud deployment monitoring (CPU/RAM usage)
-- Handle destinations not in timetable
-- Multi-language support
-
-## Success Criteria
-
-**Minimum Viable Product:**
-- NLP extracts origin/destination with >70% accuracy
-- Handles basic French sentences
-- Proper UTF-8 input/output format
-- Isolated NLP module
-- Basic pathfinding works
-
-**Target:**
-- NLP accuracy >85% on test set
-- Robust to misspellings and formatting issues
-- Fine-tuned transformer model
-- Comprehensive documentation with metrics
-
-## Key Constraints
-
-1. Must handle French language (primary requirement)
-2. Must distinguish between valid/invalid travel orders
-3. Must handle ambiguous city names in context
-4. Must process text without capitals/accents/hyphens
-5. NLP component must be testable independently
-6. All I/O must use UTF-8 encoding
