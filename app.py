@@ -343,11 +343,28 @@ with tab_nlp:
     st.subheader("Tester l'extraction NLP")
     st.markdown("Entrez une phrase en français — les deux modèles sont appliqués en parallèle.")
 
-    sentence = st.text_input(
-        "Phrase",
-        value="je voudrais un billet de nice pour aller a toulouse stp",
-        placeholder="Ex: de paris a lyon sans escale",
-    )
+    col_text, col_mic = st.columns([5, 1])
+    with col_text:
+        sentence = st.text_input(
+            "Phrase",
+            value=st.session_state.get("nlp_voice_text", "je voudrais un billet de nice pour aller a toulouse stp"),
+            placeholder="Ex: de paris a lyon sans escale",
+            key="nlp_sentence_input",
+        )
+    with col_mic:
+        st.markdown("<br>", unsafe_allow_html=True)
+        audio_nlp = st.audio_input("🎤", key="nlp_audio", label_visibility="collapsed")
+
+    if audio_nlp is not None:
+        with st.spinner("Transcription Whisper..."):
+            from src.utils.stt import transcribe_audio_bytes
+            transcribed = transcribe_audio_bytes(audio_nlp.getvalue())
+        if transcribed:
+            st.session_state["nlp_voice_text"] = transcribed
+            st.success(f"Transcrit : *{transcribed}*")
+            st.rerun()
+        else:
+            st.warning("Transcription vide — réessayez.")
 
     if st.button("Extraire", type="primary", key="nlp_btn") and sentence.strip():
         col_base, col_camembert = st.columns(2)
@@ -406,7 +423,28 @@ with tab_route:
     input_mode = st.radio("Mode de saisie", ["Phrase libre", "Villes directes"], horizontal=True)
 
     if input_mode == "Phrase libre":
-        phrase_route = st.text_input("Phrase", value="de nice a toulouse", key="route_phrase")
+        col_rt, col_rm = st.columns([5, 1])
+        with col_rt:
+            phrase_route = st.text_input(
+                "Phrase",
+                value=st.session_state.get("route_voice_text", "de nice a toulouse"),
+                key="route_phrase",
+            )
+        with col_rm:
+            st.markdown("<br>", unsafe_allow_html=True)
+            audio_route = st.audio_input("🎤", key="route_audio", label_visibility="collapsed")
+
+        if audio_route is not None:
+            with st.spinner("Transcription Whisper..."):
+                from src.utils.stt import transcribe_audio_bytes
+                transcribed_r = transcribe_audio_bytes(audio_route.getvalue())
+            if transcribed_r:
+                st.session_state["route_voice_text"] = transcribed_r
+                st.success(f"Transcrit : *{transcribed_r}*")
+                st.rerun()
+            else:
+                st.warning("Transcription vide — réessayez.")
+
         if st.button("Calculer l'itineraire", type="primary", key="route_btn_phrase"):
             with st.spinner("Extraction NLP..."):
                 model_c = get_camembert()

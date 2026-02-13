@@ -269,6 +269,28 @@ For more information, see docs/PIPELINE_INTEGRATION.md
     )
 
     parser.add_argument(
+        '--voice',
+        action='store_true',
+        help='Voice mode: speak travel orders via microphone (uses Whisper STT)'
+    )
+
+    parser.add_argument(
+        '--whisper-model',
+        type=str,
+        default='small',
+        choices=['tiny', 'base', 'small', 'medium'],
+        help='Whisper model size for speech-to-text (default: small)'
+    )
+
+    parser.add_argument(
+        '--voice-duration',
+        type=int,
+        default=5,
+        metavar='SEC',
+        help='Microphone recording duration in seconds (default: 5)'
+    )
+
+    parser.add_argument(
         '--verbose', '-v',
         action='store_true',
         help='Enable verbose logging'
@@ -387,6 +409,114 @@ def run_interactive(model_type: str, model_path: str, logger: logging.Logger) ->
 
         except KeyboardInterrupt:
             print("\n\nInterrupted. Goodbye!")
+            break
+        except Exception as e:
+            print(f"\n[ERROR] {e}\n")
+
+    return 0
+
+
+def run_voice(
+    model_type: str,
+    model_path: str,
+    whisper_model: str,
+    duration: int,
+    logger: logging.Logger,
+) -> int:
+    """
+    Voice mode: record from microphone, transcribe with Whisper, then extract
+    NLP entities and compute the SNCF route — same as interactive mode but
+    with speech input instead of keyboard.
+
+    Args:
+        model_type: 'baseline' or 'camembert'
+        model_path: Path to CamemBERT model
+        whisper_model: Whisper model size ('tiny', 'base', 'small', 'medium')
+        duration: Recording duration in seconds per utterance
+        logger: Logger instance
+
+    Returns:
+        Exit code (0 for success, 1 for error)
+    """
+    from src.utils.stt import load_whisper, transcribe_from_microphone
+
+    print(f"Loading NLP model: {model_type}...")
+    try:
+        model = load_nlp_model(model_type, model_path)
+    except Exception as e:
+        print(f"[ERROR] Failed to load NLP model: {e}")
+        return 1
+
+    print("Loading railway network...")
+    try:
+        city_mapping = load_city_mapping()
+        graph = get_or_build_graph()
+    except Exception as e:
+        print(f"[ERROR] Failed to load railway network: {e}")
+        return 1
+
+    print(f"Loading Whisper '{whisper_model}' model...")
+    try:
+        load_whisper(whisper_model)
+    except Exception as e:
+        print(f"[ERROR] Failed to load Whisper: {e}")
+        return 1
+
+    print(f"\nReady ({model_type} + Whisper '{whisper_model}' + SNCF network)")
+    print(f"Recording duration: {duration}s per utterance.")
+    print("Press Ctrl+C to stop.\n")
+
+    while True:
+        try:
+            input("  [Appuyez sur Entree pour parler]")
+            transcribed = transcribe_from_microphone(
+                duration=duration,
+                model_name=whisper_model,
+                language="fr",
+            )
+
+            if not transcribed:
+                print("  [Aucun texte transcrit — réessayez]\n")
+                continue
+
+            print(f"\n  Transcrit : \"{transcribed}\"")
+
+            result = _extract(transcribed, model, model_type)
+            origin = result.get('origin')
+            destination = result.get('destination')
+            valid = result.get('valid', False)
+
+            if not valid or not origin or not destination:
+                print("  Resultat : INVALID (pas un ordre de voyage)\n")
+                continue
+
+            print(f"  Origine      : {origin}")
+            print(f"  Destination  : {destination}")
+
+            origin_uic = map_city_to_uic(origin, city_mapping)
+            dest_uic   = map_city_to_uic(destination, city_mapping)
+
+            if not origin_uic:
+                print(f"  Route : ['{origin}' introuvable dans le reseau SNCF]\n")
+            elif not dest_uic:
+                print(f"  Route : ['{destination}' introuvable dans le reseau SNCF]\n")
+            else:
+                try:
+                    path, total_time = dijkstra(graph, origin_uic, dest_uic)
+                    route = []
+                    for uic in path:
+                        info = get_station_info(graph, uic)
+                        route.append(info.get('city_name', uic) if info else uic)
+                    h = int(total_time // 60)
+                    m = int(total_time % 60)
+                    print(f"  Route : {' -> '.join(route)}")
+                    print(f"  Duree : {h}h{m:02d}" if h else f"  Duree : {m} min")
+                except (InvalidStationError, NoPathError) as e:
+                    print(f"  Route : [aucun chemin : {e}]")
+            print()
+
+        except KeyboardInterrupt:
+            print("\n\nAu revoir !")
             break
         except Exception as e:
             print(f"\n[ERROR] {e}\n")
@@ -581,6 +711,14 @@ def main() -> int:
     # Interactive mode: no CSV needed
     if args.interactive:
         return run_interactive(args.model, args.model_path, logger)
+
+    # Voice mode
+    if args.voice:
+        return run_voice(
+            args.model, args.model_path,
+            args.whisper_model, args.voice_duration,
+            logger,
+        )
 
     # Evaluate mode
     if args.evaluate:
